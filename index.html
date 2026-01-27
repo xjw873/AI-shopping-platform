@@ -1,0 +1,795 @@
+<!-- <!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI 聊天助手</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 0 10px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .user-info {
+        background: #f0f0f0;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+      }
+      #chat {
+        border: 1px solid #ccc;
+        height: 400px;
+        overflow-y: auto;
+        padding: 10px;
+        margin-bottom: 10px;
+        background: #f9f9f9;
+      }
+      #chat div {
+        margin-bottom: 8px;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 8px;
+        font-size: 16px;
+      }
+      select {
+        padding: 8px;
+        font-size: 16px;
+      }
+      button {
+        padding: 8px 16px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .user-message {
+        background: #e3f2fd;
+        padding: 8px;
+        border-radius: 10px;
+        margin: 5px 0;
+      }
+      .ai-message {
+        background: #f5f5f5;
+        padding: 8px;
+        border-radius: 10px;
+        margin: 5px 0;
+      }
+      .model-tag {
+        font-size: 12px;
+        color: #666;
+        background: #eee;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h2>💬 智能电商购物助手</h2>
+      <div class="controls">
+        <select id="modelSelect" onchange="switchModel()">
+          <option value="qwen-doc-turbo">通义千问-Doc</option>
+          <option value="gpt-4">GPT-4</option>
+        </select>
+        <button onclick="createNewUser()">新建会话</button>
+      </div>
+    </div>
+
+    <div class="user-info" id="userInfo">
+      用户ID: <span id="userIdDisplay">加载中...</span> | 当前模型:
+      <span id="currentModel">通义千问-Doc</span>
+    </div>
+
+    <div id="chat"></div>
+
+    <div class="controls">
+      <input
+        type="text"
+        id="userInput"
+        placeholder="输入你的回答（是/否）或问题..."
+      />
+      <button onclick="sendMessage()">发送</button>
+    </div>
+
+    <script>
+      let currentUserId = null;
+      let currentModel = "qwen-doc-turbo";
+      let availableModels = {};
+
+      // 页面加载时初始化
+      async function initialize() {
+        await loadAvailableModels();
+
+        // 检查是否有存储的用户ID
+        const savedUserId = localStorage.getItem("user_id");
+        if (savedUserId) {
+          try {
+            const response = await fetch(`/user-info/${savedUserId}`);
+            if (response.ok) {
+              const userInfo = await response.json();
+              currentUserId = userInfo.user_id;
+              currentModel = userInfo.current_model || "qwen-doc-turbo";
+              updateUI();
+              loadHistory();
+              return;
+            }
+          } catch (error) {
+            console.log("已保存的用户无效，创建新用户");
+          }
+        }
+
+        // 创建新用户
+        await createNewUser();
+      }
+
+      // 加载可用模型
+      async function loadAvailableModels() {
+        try {
+          const response = await fetch("/available-models");
+          const data = await response.json();
+          availableModels = data.models;
+
+          // 更新模型选择框
+          const modelSelect = document.getElementById("modelSelect");
+          modelSelect.innerHTML = "";
+          availableModels.forEach((model) => {
+            const option = document.createElement("option");
+            option.value = model.id;
+            option.textContent = model.name;
+            modelSelect.appendChild(option);
+          });
+        } catch (error) {
+          console.error("加载模型列表失败:", error);
+        }
+      }
+
+      // 创建新用户
+      async function createNewUser() {
+        try {
+          const response = await fetch("/create-user", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: null }),
+          });
+
+          const data = await response.json();
+          currentUserId = data.user_id;
+          currentModel = data.current_model || "qwen-doc-turbo";
+
+          // 保存到本地存储
+          localStorage.setItem("user_id", currentUserId);
+
+          // 清空聊天记录
+          document.getElementById("chat").innerHTML = "";
+
+          updateUI();
+          appendMessage("system", "新会话已创建！请告诉我您想购买什么商品？");
+        } catch (error) {
+          console.error("创建用户失败:", error);
+          appendMessage("system", "❌ 创建会话失败：" + error.message);
+        }
+      }
+
+      // 切换模型
+      async function switchModel() {
+        const modelSelect = document.getElementById("modelSelect");
+        const newModel = modelSelect.value;
+
+        if (newModel === currentModel) return;
+
+        if (!currentUserId) {
+          alert("请先创建或选择用户");
+          return;
+        }
+
+        try {
+          const response = await fetch("/switch-model", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              model: newModel,
+            }),
+          });
+
+          if (response.ok) {
+            currentModel = newModel;
+            updateUI();
+            appendMessage(
+              "system",
+              `已切换模型到：${availableModels.find((m) => m.id === newModel)?.name || newModel}`,
+            );
+          }
+        } catch (error) {
+          console.error("切换模型失败:", error);
+          appendMessage("system", "❌ 切换模型失败：" + error.message);
+        }
+      }
+
+      // 更新UI
+      function updateUI() {
+        document.getElementById("userIdDisplay").textContent =
+          currentUserId || "未设置";
+        document.getElementById("currentModel").textContent =
+          availableModels.find((m) => m.id === currentModel)?.name ||
+          currentModel;
+
+        // 设置模型选择框
+        const modelSelect = document.getElementById("modelSelect");
+        modelSelect.value = currentModel;
+      }
+
+      // 添加消息到聊天框
+      function appendMessage(role, content, model = null) {
+        const chatBox = document.getElementById("chat");
+        const messageDiv = document.createElement("div");
+        messageDiv.className = role === "user" ? "user-message" : "ai-message";
+
+        let roleText = "";
+        switch (role) {
+          case "user":
+            roleText = "👤 你";
+            break;
+          case "ai":
+            roleText = "🤖 AI助手";
+            break;
+          case "system":
+            roleText = "ℹ️ 系统";
+            break;
+        }
+
+        messageDiv.innerHTML = `
+                <strong>${roleText}:</strong> ${content}
+                ${model ? `<span class="model-tag">${model}</span>` : ""}
+            `;
+        chatBox.appendChild(messageDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+
+      // 加载历史记录
+      async function loadHistory() {
+        if (!currentUserId) return;
+
+        try {
+          const response = await fetch(`/history/${currentUserId}`);
+          const history = await response.json();
+
+          const chatBox = document.getElementById("chat");
+          chatBox.innerHTML = "";
+
+          history.forEach((item) => {
+            appendMessage("user", item.user);
+            appendMessage("ai", item.ai, item.model_used);
+          });
+        } catch (error) {
+          console.error("加载历史记录失败:", error);
+        }
+      }
+
+      // 发送消息
+      async function sendMessage() {
+        const input = document.getElementById("userInput");
+        const text = input.value.trim();
+        if (!text || !currentUserId) return;
+
+        // 显示用户消息
+        appendMessage("user", text);
+        input.value = "";
+
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              message: text,
+              model: currentModel,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          // 显示AI回复
+          const modelName =
+            availableModels.find((m) => m.id === data.model_used)?.name ||
+            data.model_used;
+          appendMessage("ai", data.ai_reply, modelName);
+        } catch (error) {
+          console.error("Error:", error);
+          appendMessage("ai", "❌ 服务器错误：" + error.message);
+        }
+      }
+
+      // 支持回车发送
+      document.getElementById("userInput").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          sendMessage();
+        }
+      });
+
+      // 初始化页面
+      initialize();
+    </script>
+  </body>
+</html> -->
+
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>智能电商购物助手</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 0 10px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .session-info {
+        background: #f0f0f0;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      #chat {
+        border: 1px solid #ccc;
+        height: 400px;
+        overflow-y: auto;
+        padding: 10px;
+        margin-bottom: 10px;
+        background: #f9f9f9;
+      }
+      .message {
+        margin-bottom: 10px;
+        padding: 8px;
+        border-radius: 8px;
+      }
+      .user-message {
+        background: #e3f2fd;
+        margin-left: 20%;
+      }
+      .ai-message {
+        background: #f5f5f5;
+        margin-right: 20%;
+      }
+      .message-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        font-size: 12px;
+        color: #666;
+      }
+      .turn-badge {
+        background: #666;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        margin-right: 5px;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 8px;
+        font-size: 16px;
+      }
+      select {
+        padding: 8px;
+        font-size: 16px;
+      }
+      button {
+        padding: 8px 16px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .model-tag {
+        font-size: 12px;
+        color: #666;
+        background: #eee;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 5px;
+      }
+      .status-badge {
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 12px;
+        margin-left: 10px;
+      }
+      .status-active {
+        background: #4caf50;
+        color: white;
+      }
+      .status-ended {
+        background: #f44336;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h2>💬 智能电商购物助手</h2>
+      <div class="controls">
+        <select id="modelSelect">
+          <option value="qwen-doc-turbo">通义千问-Doc</option>
+          <option value="gpt-4">GPT-4</option>
+        </select>
+        <button onclick="createNewSession()">开始新会话</button>
+      </div>
+    </div>
+
+    <div class="session-info" id="sessionInfo">
+      <div>
+        <strong>会话ID:</strong> <span id="sessionIdDisplay">未开始</span>
+        <span id="sessionStatus" class="status-badge">未激活</span>
+        | <strong>模型:</strong> <span id="currentModel">通义千问-Doc</span> |
+        <strong>轮次:</strong> <span id="turnCount">0</span>
+      </div>
+      <button onclick="endCurrentSession()" id="endSessionBtn" disabled>
+        结束会话
+      </button>
+    </div>
+
+    <div id="chat"></div>
+
+    <div class="controls">
+      <input
+        type="text"
+        id="userInput"
+        placeholder="输入你的回答（是/否）..."
+        disabled
+      />
+      <button onclick="sendMessage()" id="sendBtn" disabled>发送</button>
+    </div>
+
+    <script>
+      let currentSessionId = null;
+      let currentModel = "qwen-doc-turbo";
+      let currentTurn = 0;
+      let sessionActive = false;
+      let currentUserId = null;
+
+      // 页面加载时初始化
+      async function initialize() {
+        await loadAvailableModels();
+
+        // 检查本地存储
+        const savedSessionId = localStorage.getItem("current_session_id");
+        const savedUserId = localStorage.getItem("user_id");
+
+        if (savedSessionId && savedUserId) {
+          try {
+            await loadSession(savedSessionId);
+            return;
+          } catch (error) {
+            console.log("恢复会话失败，开始新会话");
+          }
+        }
+
+        // 显示欢迎信息
+        appendMessage(
+          "system",
+          '👋 欢迎使用智能电商购物助手！请点击"开始新会话"按钮开始。',
+        );
+      }
+
+      // 加载可用模型
+      async function loadAvailableModels() {
+        try {
+          const response = await fetch("/available-models");
+          const data = await response.json();
+
+          const modelSelect = document.getElementById("modelSelect");
+          modelSelect.innerHTML = "";
+
+          data.models.forEach((model) => {
+            const option = document.createElement("option");
+            option.value = model.id;
+            option.textContent = model.name;
+            modelSelect.appendChild(option);
+          });
+        } catch (error) {
+          console.error("加载模型列表失败:", error);
+        }
+      }
+
+      // 创建新会话
+      async function createNewSession() {
+        const selectedModel = document.getElementById("modelSelect").value;
+
+        try {
+          // 如果没有用户ID，先创建或获取一个
+          if (!currentUserId) {
+            // 尝试从localStorage获取或生成新的
+            currentUserId = localStorage.getItem("user_id") || generateUserId();
+            localStorage.setItem("user_id", currentUserId);
+          }
+
+          const response = await fetch("/create-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              model: selectedModel,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+          }
+
+          const data = await response.json();
+          currentSessionId = data.session_id;
+          currentModel = data.model_used;
+          currentTurn = 0;
+          sessionActive = true;
+
+          // 保存到本地存储
+          localStorage.setItem("current_session_id", currentSessionId);
+
+          // 清空聊天记录
+          document.getElementById("chat").innerHTML = "";
+
+          // 更新UI
+          updateSessionUI();
+          enableControls();
+
+          appendMessage(
+            "system",
+            `🆕 新会话已开始！会话ID: ${currentSessionId.substring(0, 8)}...`,
+          );
+          appendMessage("system", "请告诉我您想购买什么商品？");
+        } catch (error) {
+          console.error("创建会话失败:", error);
+          appendMessage("system", "❌ 创建会话失败: " + error.message);
+        }
+      }
+
+      // 加载现有会话
+      async function loadSession(sessionId) {
+        try {
+          const response = await fetch(`/session-history/${sessionId}`);
+          if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+          }
+
+          const data = await response.json();
+          currentSessionId = data.session_id;
+          currentModel = data.model_used;
+          currentTurn = data.conversations.length;
+          sessionActive = data.is_active;
+          currentUserId = data.user_id;
+
+          // 保存到本地存储
+          localStorage.setItem("current_session_id", currentSessionId);
+          localStorage.setItem("user_id", currentUserId);
+
+          // 清空并重新加载聊天记录
+          const chatBox = document.getElementById("chat");
+          chatBox.innerHTML = "";
+
+          // 显示历史对话
+          data.conversations.forEach((conv) => {
+            appendMessage("user", conv.user_message, conv.turn_number);
+            appendMessage("ai", conv.ai_response, conv.turn_number);
+          });
+
+          // 更新UI
+          updateSessionUI();
+
+          if (sessionActive) {
+            enableControls();
+            appendMessage("system", "✅ 会话已恢复，可以继续对话");
+          } else {
+            disableControls();
+            appendMessage("system", "⏹️ 此会话已结束，请开始新会话");
+          }
+        } catch (error) {
+          console.error("加载会话失败:", error);
+          throw error;
+        }
+      }
+
+      // 结束当前会话
+      async function endCurrentSession() {
+        if (!currentSessionId || !sessionActive) return;
+
+        if (!confirm("确定要结束当前会话吗？结束后将无法继续此对话。")) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/end-session/${currentSessionId}`, {
+            method: "POST",
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP错误: ${response.status}`);
+          }
+
+          const data = await response.json();
+          sessionActive = false;
+
+          // 清除会话存储
+          localStorage.removeItem("current_session_id");
+
+          // 更新UI
+          updateSessionUI();
+          disableControls();
+
+          appendMessage("system", "✅ 会话已结束。感谢您的使用！");
+        } catch (error) {
+          console.error("结束会话失败:", error);
+          appendMessage("system", "❌ 结束会话失败: " + error.message);
+        }
+      }
+
+      // 发送消息
+      async function sendMessage() {
+        const input = document.getElementById("userInput");
+        const text = input.value.trim();
+        if (!text || !currentSessionId || !sessionActive) return;
+
+        // 显示用户消息
+        currentTurn++;
+        appendMessage("user", text, currentTurn);
+        input.value = "";
+        input.disabled = true;
+
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: currentSessionId,
+              message: text,
+              model: currentModel,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP错误: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // 显示AI回复
+          appendMessage("ai", data.ai_reply, data.turn_number);
+
+          // 更新轮次
+          currentTurn = data.turn_number;
+          updateSessionUI();
+        } catch (error) {
+          console.error("Error:", error);
+          appendMessage("system", "❌ 发送失败: " + error.message);
+          currentTurn--; // 回滚轮次
+        } finally {
+          input.disabled = false;
+          input.focus();
+        }
+      }
+
+      // 添加消息到聊天框
+      function appendMessage(role, content, turnNumber = null) {
+        const chatBox = document.getElementById("chat");
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${role}-message`;
+
+        let roleText = "";
+        switch (role) {
+          case "user":
+            roleText = "👤 你";
+            break;
+          case "ai":
+            roleText = "🤖 AI助手";
+            break;
+          case "system":
+            roleText = "ℹ️ 系统";
+            break;
+        }
+
+        const turnBadge = turnNumber
+          ? `<span class="turn-badge">第${turnNumber}轮</span>`
+          : "";
+        const modelTag =
+          role === "ai" ? `<span class="model-tag">${currentModel}</span>` : "";
+
+        messageDiv.innerHTML = `
+                <div class="message-header">
+                    <span>${turnBadge}${roleText}${modelTag}</span>
+                    <span>${new Date().toLocaleTimeString()}</span>
+                </div>
+                <div>${content}</div>
+            `;
+        chatBox.appendChild(messageDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+
+      // 生成用户ID
+      function generateUserId() {
+        return "user_" + Math.random().toString(36).substr(2, 9);
+      }
+
+      // 更新会话UI
+      function updateSessionUI() {
+        document.getElementById("sessionIdDisplay").textContent =
+          currentSessionId
+            ? currentSessionId.substring(0, 8) + "..."
+            : "未开始";
+
+        const statusBadge = document.getElementById("sessionStatus");
+        if (sessionActive) {
+          statusBadge.textContent = "活跃";
+          statusBadge.className = "status-badge status-active";
+        } else if (currentSessionId) {
+          statusBadge.textContent = "已结束";
+          statusBadge.className = "status-badge status-ended";
+        } else {
+          statusBadge.textContent = "未激活";
+          statusBadge.className = "status-badge";
+        }
+
+        document.getElementById("currentModel").textContent = currentModel;
+        document.getElementById("turnCount").textContent = currentTurn;
+
+        // 更新模型选择框
+        document.getElementById("modelSelect").value = currentModel;
+
+        // 更新按钮状态
+        document.getElementById("endSessionBtn").disabled = !sessionActive;
+      }
+
+      // 启用控制
+      function enableControls() {
+        document.getElementById("userInput").disabled = false;
+        document.getElementById("sendBtn").disabled = false;
+        document.getElementById("userInput").focus();
+      }
+
+      // 禁用控制
+      function disableControls() {
+        document.getElementById("userInput").disabled = true;
+        document.getElementById("sendBtn").disabled = true;
+      }
+
+      // 支持回车发送
+      document.getElementById("userInput").addEventListener("keypress", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // 初始化页面
+      initialize();
+    </script>
+  </body>
+</html>
