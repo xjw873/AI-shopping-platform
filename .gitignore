@@ -1,0 +1,29 @@
+# 环境变量文件
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+* $ py.class
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# 数据库文件（SQLite）
+*.db
+*.sqlite
+
+# 临时导出文件
+*.xlsx
+*.csv
+*.json.tmp
+
+# IDE 和编辑器文件
+.idea/
+.vscode/
+*.swp
+*.swo
