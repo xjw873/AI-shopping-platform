@@ -557,33 +557,33 @@ def end_session(session_id: str, db: Session = Depends(get_db)):
         "total_turns": len(session.conversations)
     }
 
-@app.get("/session-history/{session_id}")
-def get_session_history(session_id: str, db: Session = Depends(get_db)):
-    """获取指定会话的所有对话记录"""
-    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话未找到")
+# @app.get("/session-history/{session_id}")
+# def get_session_history(session_id: str, db: Session = Depends(get_db)):
+#     """获取指定会话的所有对话记录"""
+#     session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+#     if not session:
+#         raise HTTPException(status_code=404, detail="会话未找到")
     
-    conversations = db.query(Conversation).filter(
-        Conversation.session_id == session.id
-    ).order_by(Conversation.turn_number.asc()).all()
+#     conversations = db.query(Conversation).filter(
+#         Conversation.session_id == session.id
+#     ).order_by(Conversation.turn_number.asc()).all()
     
-    return {
-        "session_id": session_id,
-        "user_id": session.user.user_id,
-        "model_used": session.model_used,
-        "start_time": session.start_time,
-        "end_time": session.end_time,
-        "is_active": session.is_active,
-        "conversations": [{
-            "id": c.id,
-            "turn_number": c.turn_number,
-            "user_message": c.user_message,
-            "ai_response": c.ai_response,
-            "timestamp": c.timestamp.isoformat(),
-            "message_rating": c.message_rating
-        } for c in conversations]
-    }
+#     return {
+#         "session_id": session_id,
+#         "user_id": session.user.user_id,
+#         "model_used": session.model_used,
+#         "start_time": session.start_time,
+#         "end_time": session.end_time,
+#         "is_active": session.is_active,
+#         "conversations": [{
+#             "id": c.id,
+#             "turn_number": c.turn_number,
+#             "user_message": c.user_message,
+#             "ai_response": c.ai_response,
+#             "timestamp": c.timestamp.isoformat(),
+#             "message_rating": c.message_rating
+#         } for c in conversations]
+#     }
 
 @app.get("/user-sessions/{user_id}")
 def get_user_sessions(user_id: str, db: Session = Depends(get_db)):
@@ -642,5 +642,6 @@ def get_available_models():
 # 挂载静态文件
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
+
 
 print("✅ 服务已启动，使用会话管理逻辑")
