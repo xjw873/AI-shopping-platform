@@ -647,6 +647,8 @@ def get_available_models():
 # 受保护的管理员路由
 # ==============================
 # 在导出路由前添加认证依赖
+# 创建安全认证
+security = HTTPBasic()
 def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
     """要求管理员权限的依赖项"""
     return verify_admin(credentials)
@@ -733,8 +735,7 @@ async def admin_check(username: str = Depends(require_admin)):
 # 配置管理密码
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")  # 默认密码，生产环境要改
 
-# 创建安全认证
-security = HTTPBasic()
+
 
 def verify_admin(credentials: HTTPBasicCredentials):
     """验证管理员密码"""
@@ -1053,6 +1054,7 @@ app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
 
 
 
