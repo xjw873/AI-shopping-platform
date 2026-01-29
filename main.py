@@ -657,7 +657,73 @@ async def admin_page(request: Request, username: str = Depends(require_admin)):
     
 # 挂载静态文件
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ==============================
+# 公开路由（无需认证）
+# ==============================
 
+@app.get("/admin/login")
+async def admin_login_page():
+    """管理员登录页面"""
+    # 读取登录页面
+    try:
+        with open("admin_login.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        # 如果登录页面不存在，返回简单的登录表单
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>管理员登录</title></head>
+        <body style="font-family: Arial; padding: 20px;">
+            <h2>管理员登录</h2>
+            <form id="loginForm">
+                <div>
+                    <label>用户名: </label>
+                    <input type="text" id="username" value="admin">
+                </div>
+                <div>
+                    <label>密码: </label>
+                    <input type="password" id="password">
+                </div>
+                <button type="submit">登录</button>
+            </form>
+            <div id="message" style="color: red; margin-top: 10px;"></div>
+            <script>
+                document.getElementById('loginForm').addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    const username = document.getElementById('username').value;
+                    const password = document.getElementById('password').value;
+                    const credentials = btoa(username + ':' + password);
+                    
+                    const response = await fetch('/admin', {
+                        headers: { 'Authorization': 'Basic ' + credentials }
+                    });
+                    
+                    if (response.ok) {
+                        window.location.href = '/admin';
+                    } else {
+                        document.getElementById('message').textContent = '登录失败';
+                    }
+                });
+            </script>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+
+@app.get("/admin/logout")
+async def admin_logout():
+    """管理员登出"""
+    response = RedirectResponse(url="/admin/login")
+    # 清除可能的认证头（实际上由浏览器管理）
+    return response
+
+@app.get("/admin/check")
+async def admin_check(username: str = Depends(require_admin)):
+    """检查管理员权限（用于前端验证）"""
+    return {"status": "authenticated", "username": username}
+    
 # ==============================
 # 配置管理密码功能
 # ==============================
@@ -987,6 +1053,7 @@ app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
 
 
 
