@@ -319,6 +319,11 @@ from typing import Optional, Dict
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi import HTTPException, Request, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.responses import RedirectResponse, HTMLResponse
+import secrets
+import base64
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from openai import OpenAI
@@ -643,6 +648,43 @@ def get_available_models():
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ==============================
+# 配置管理密码功能
+# ==============================
+# 配置管理密码
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")  # 默认密码，生产环境要改
+
+# 创建安全认证
+security = HTTPBasic()
+
+def verify_admin(credentials: HTTPBasicCredentials):
+    """验证管理员密码"""
+    current_username_bytes = credentials.username.encode("utf8")
+    correct_username_bytes = b"admin"
+    current_password_bytes = credentials.password.encode("utf8")
+    correct_password_bytes = ADMIN_PASSWORD.encode("utf8")
+    
+    # 使用时间恒定的比较防止时序攻击
+    username_correct = secrets.compare_digest(
+        current_username_bytes, correct_username_bytes
+    )
+    password_correct = secrets.compare_digest(
+        current_password_bytes, correct_password_bytes
+    )
+    
+    if not (username_correct and password_correct):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+# 在导出路由前添加认证依赖
+def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    """要求管理员权限的依赖项"""
+    return verify_admin(credentials)
+    
+# ==============================
 # 数据导出功能
 # ==============================
 
@@ -929,5 +971,6 @@ app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
 
 
