@@ -643,7 +643,18 @@ def get_available_models():
             for model_id, config in MODELS_CONFIG.items()
         ]
     }
+# ==============================
+# 受保护的管理员路由
+# ==============================
 
+@app.get("/admin")
+async def admin_page(request: Request, username: str = Depends(require_admin)):
+    """返回管理员页面（需要认证）"""
+    # 读取admin.html文件内容
+    with open("admin.html", "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
+    
 # 挂载静态文件
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -709,7 +720,8 @@ class ExportRequest(BaseModel):
 @app.post("/export/data")
 async def export_data(
     request: ExportRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    username: str = Depends(require_admin)  # 添加认证
 ):
     """
     导出数据为Excel/CSV/JSON格式
@@ -863,7 +875,8 @@ async def export_data(
 @app.get("/export/quick")
 async def quick_export(
     format: str = "excel",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    username: str = Depends(require_admin)  # 添加认证
 ):
     """
     快速导出 - 所有数据
@@ -877,7 +890,10 @@ async def quick_export(
     return await export_data(request, db)
 
 @app.get("/export/statistics")
-async def get_statistics(db: Session = Depends(get_db)):
+async def get_statistics(
+    db: Session = Depends(get_db),
+    username: str = Depends(require_admin)  # 添加认证
+):
     """
     获取统计信息
     """
@@ -971,6 +987,7 @@ app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
 
 
 
