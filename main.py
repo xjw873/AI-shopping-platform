@@ -901,11 +901,33 @@ async def get_statistics(db: Session = Depends(get_db)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}")
+# ==============================
+# 管理员访问路由
+# ==============================
 
+@app.get("/admin")
+async def admin_page():
+    """返回管理员页面"""
+    return FileResponse("admin.html")
+
+# 可选：添加简单的身份验证
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+@app.get("/admin/login")
+async def admin_login(password: str):
+    """简单的管理员登录验证"""
+    if not ADMIN_PASSWORD:
+        return {"message": "管理员功能未配置"}
+    
+    if password == ADMIN_PASSWORD:
+        return {"status": "success", "token": "admin_token"}
+    else:
+        raise HTTPException(status_code=401, detail="密码错误")
 
 
 app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
 
