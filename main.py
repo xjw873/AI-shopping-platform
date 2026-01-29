@@ -646,7 +646,10 @@ def get_available_models():
 # ==============================
 # 受保护的管理员路由
 # ==============================
-
+# 在导出路由前添加认证依赖
+def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    """要求管理员权限的依赖项"""
+    return verify_admin(credentials)
 @app.get("/admin")
 async def admin_page(request: Request, username: str = Depends(require_admin)):
     """返回管理员页面（需要认证）"""
@@ -756,10 +759,7 @@ def verify_admin(credentials: HTTPBasicCredentials):
         )
     return credentials.username
 
-# 在导出路由前添加认证依赖
-def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    """要求管理员权限的依赖项"""
-    return verify_admin(credentials)
+
     
 # ==============================
 # 数据导出功能
@@ -1053,6 +1053,7 @@ app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
 
 
 
