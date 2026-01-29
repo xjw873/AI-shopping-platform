@@ -641,7 +641,271 @@ def get_available_models():
 
 # 挂载静态文件
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ==============================
+# 数据导出功能
+# ==============================
+
+from fastapi.responses import StreamingResponse, FileResponse
+import pandas as pd
+from io import BytesIO, StringIO
+import zipfile
+import json
+# 在文件顶部添加导入
+from sqlalchemy import func, distinct
+from datetime import timedelta
+
+class ExportRequest(BaseModel):
+    """导出请求模型"""
+    format: str = "excel"  # excel, csv, json
+    include_users: bool = True
+    include_sessions: bool = True
+    include_conversations: bool = True
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+@app.post("/export/data")
+async def export_data(
+    request: ExportRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    导出数据为Excel/CSV/JSON格式
+    支持按时间范围筛选
+    """
+    try:
+        # 基础查询
+        base_conditions = []
+        
+        # 添加时间范围筛选
+        if request.start_date:
+            base_conditions.append(ChatSession.start_time >= request.start_date)
+        if request.end_date:
+            base_conditions.append(ChatSession.start_time <= request.end_date)
+        
+        # 1. 导出用户数据
+        users_data = []
+        if request.include_users:
+            users_query = db.query(User)
+            users = users_query.all()
+            users_data = [{
+                "用户ID": user.user_id,
+                "创建时间": user.created_at,
+                "会话数量": len(user.sessions)
+            } for user in users]
+        
+        # 2. 导出会话数据
+        sessions_data = []
+        if request.include_sessions:
+            sessions_query = db.query(ChatSession)
+            if base_conditions:
+                for condition in base_conditions:
+                    sessions_query = sessions_query.filter(condition)
+            
+            sessions = sessions_query.order_by(ChatSession.start_time.desc()).all()
+            sessions_data = [{
+                "会话ID": session.session_id,
+                "用户ID": session.user.user_id if session.user else None,
+                "使用模型": session.model_used,
+                "开始时间": session.start_time,
+                "结束时间": session.end_time,
+                "是否活跃": "是" if session.is_active else "否",
+                "对话轮数": len(session.conversations)
+            } for session in sessions]
+        
+        # 3. 导出对话数据
+        conversations_data = []
+        if request.include_conversations:
+            conv_query = db.query(Conversation).join(ChatSession)
+            if base_conditions:
+                for condition in base_conditions:
+                    conv_query = conv_query.filter(condition)
+            
+            conversations = conv_query.order_by(Conversation.timestamp).all()
+            conversations_data = [{
+                "会话ID": conv.session.session_id if conv.session else None,
+                "轮次": conv.turn_number,
+                "用户提问": conv.user_message,
+                "AI回复": conv.ai_response,
+                "时间": conv.timestamp,
+                "消息评分": conv.message_rating
+            } for conv in conversations]
+        
+        # 根据格式返回数据
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if request.format == "json":
+            # 返回JSON格式
+            export_json = {
+                "export_time": datetime.now().isoformat(),
+                "statistics": {
+                    "users": len(users_data),
+                    "sessions": len(sessions_data),
+                    "conversations": len(conversations_data)
+                },
+                "data": {
+                    "users": users_data,
+                    "sessions": sessions_data,
+                    "conversations": conversations_data
+                }
+            }
+            
+            json_str = json.dumps(export_json, ensure_ascii=False, default=str, indent=2)
+            return StreamingResponse(
+                StringIO(json_str),
+                media_type="application/json",
+                headers={
+                    "Content-Disposition": f"attachment; filename=export_{timestamp}.json"
+                }
+            )
+        
+        elif request.format == "csv":
+            # 创建ZIP文件包含多个CSV
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                if users_data:
+                    users_df = pd.DataFrame(users_data)
+                    users_csv = users_df.to_csv(index=False, encoding='utf-8-sig')
+                    zip_file.writestr(f"users_{timestamp}.csv", users_csv)
+                
+                if sessions_data:
+                    sessions_df = pd.DataFrame(sessions_data)
+                    sessions_csv = sessions_df.to_csv(index=False, encoding='utf-8-sig')
+                    zip_file.writestr(f"sessions_{timestamp}.csv", sessions_csv)
+                
+                if conversations_data:
+                    convs_df = pd.DataFrame(conversations_data)
+                    convs_csv = convs_df.to_csv(index=False, encoding='utf-8-sig')
+                    zip_file.writestr(f"conversations_{timestamp}.csv", convs_csv)
+            
+            zip_buffer.seek(0)
+            return StreamingResponse(
+                zip_buffer,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f"attachment; filename=export_{timestamp}.zip"
+                }
+            )
+        
+        else:  # excel (默认)
+            # 创建Excel文件
+            excel_buffer = BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                if users_data:
+                    pd.DataFrame(users_data).to_excel(
+                        writer, sheet_name='用户', index=False
+                    )
+                
+                if sessions_data:
+                    pd.DataFrame(sessions_data).to_excel(
+                        writer, sheet_name='会话', index=False
+                    )
+                
+                if conversations_data:
+                    pd.DataFrame(conversations_data).to_excel(
+                        writer, sheet_name='对话', index=False
+                    )
+            
+            excel_buffer.seek(0)
+            return StreamingResponse(
+                excel_buffer,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={
+                    "Content-Disposition": f"attachment; filename=export_{timestamp}.xlsx"
+                }
+            )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
+
+@app.get("/export/quick")
+async def quick_export(
+    format: str = "excel",
+    db: Session = Depends(get_db)
+):
+    """
+    快速导出 - 所有数据
+    """
+    request = ExportRequest(
+        format=format,
+        include_users=True,
+        include_sessions=True,
+        include_conversations=True
+    )
+    return await export_data(request, db)
+
+@app.get("/export/statistics")
+async def get_statistics(db: Session = Depends(get_db)):
+    """
+    获取统计信息
+    """
+    try:
+        # 基础统计
+        total_users = db.query(User).count()
+        total_sessions = db.query(ChatSession).count()
+        total_conversations = db.query(Conversation).count()
+        active_sessions = db.query(ChatSession).filter(ChatSession.is_active == True).count()
+        
+        # 按模型统计
+        model_stats = db.query(
+            ChatSession.model_used,
+            func.count(ChatSession.id).label('count')
+        ).group_by(ChatSession.model_used).all()
+        
+        # 每日新增统计（最近7天）
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        daily_stats = db.query(
+            func.date(ChatSession.start_time).label('date'),
+            func.count(ChatSession.id).label('sessions'),
+            func.count(distinct(ChatSession.user_id)).label('users')
+        ).filter(
+            ChatSession.start_time >= seven_days_ago
+        ).group_by(
+            func.date(ChatSession.start_time)
+        ).order_by(
+            func.date(ChatSession.start_time).desc()
+        ).all()
+        
+        # 评分统计
+        rating_stats = db.query(
+            func.avg(Conversation.message_rating).label('avg_rating'),
+            func.count(Conversation.id).label('rated_count')
+        ).filter(
+            Conversation.message_rating.isnot(None)
+        ).first()
+        
+        return {
+            "summary": {
+                "total_users": total_users,
+                "total_sessions": total_sessions,
+                "total_conversations": total_conversations,
+                "active_sessions": active_sessions
+            },
+            "model_usage": [
+                {"model": model, "count": count}
+                for model, count in model_stats
+            ],
+            "daily_stats": [
+                {
+                    "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
+                    "sessions": sessions,
+                    "users": users
+                }
+                for date, sessions, users in daily_stats
+            ],
+            "rating_stats": {
+                "average_rating": float(rating_stats.avg_rating) if rating_stats.avg_rating else 0,
+                "rated_messages": rating_stats.rated_count or 0
+            }
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}")
+
+
+
 app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="static")
 
 
 print("✅ 服务已启动，使用会话管理逻辑")
+
